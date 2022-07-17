@@ -22,8 +22,8 @@ _Disclaimer: this guide is under active development and offered without warranty
 Broadly speaking there are four steps that need to be performed:
 1. Configuration of Azure account/services.
 2. Deployment/configuration of the **aiida-machine** with CycleCloud.
-3. Configuration/deployment of the **compute-cluster**.
-4. Installation of AiiDA and configuration to work with the **compute-cluster**.
+3. Installation of AiiDA.
+4. Configuration/deployment of the **compute-cluster**.
 
 All of these steps assume that the user has an Azure account, with the appropriate permissions to [create resource groups](https://docs.microsoft.com/en-us/azure/azure-resource-manager/management/manage-resource-groups-portal), and a [service principal](https://docs.microsoft.com/en-us/azure/active-directory/develop/app-objects-and-service-principals#service-principal-object). The examples will show how many of the operations are performed making use of the Azure CLI, however, it is important to notice that all these operations can be also performed by the Azure portal or the Azure PowerShell.
 
@@ -158,6 +158,30 @@ httpProxy <insert the http proxy server if any if you have turned https off usin
 If `blobfuse` were to fail, or if one wants to stop the process, one can use `fusermount -u path_where_to_mount` to unmount the disk.
 
 #### Install `AiiDA`
+[Installing `AiiDA`](https://aiida.readthedocs.io/projects/aiida-core/en/latest/intro/install_system.html#intro-get-started-system-wide-install) in an Azure VM is performed in the same way as one would in a local machine. One should install it using a virtual environment to ensure that there are no conflicts with dependencies. It can be either via `virtualenv` or `conda`.
+
+First one should install the prerequisites 
+```
+sudo apt install git python3-dev python3-pip postgresql postgresql-server-dev-all postgresql-client rabbitmq-server
+```
+**Important:** CycleCloud will use port `5672` the same default port from RabbitMQ, thus when RabbitMQ is installed it will instead probably use port `5673`. To check which exact port is being used one can run the command
+```
+sudo lsof -i -P -n | grep 'rabbitmq'
+```
+
+Once the pre-requisites have been installed one can install aiida-core using `pip`  in a virtual environment via
+```
+python -m venv ~/envs/aiida
+source ~/envs/aiida/bin/activate
+pip install aiida-core
+```
+
+Lastly, one needs to configure an aiida profile. To ensure that all the configuration is performed properly (mostly due to the possible issues with RabbitMQ) [`verdi setup`](https://aiida.readthedocs.io/projects/aiida-core/en/latest/intro/installation.html) is preferred over `verdi quicksetup`.
+
+When setting up the RabbitMQ configuration via `verdi setup` one must ensure that the proper port (not the default one) is passed to the [configuration](https://aiida.readthedocs.io/projects/aiida-core/en/latest/intro/installation.html#rabbitmq-configuration).
+
+With `blobfuse` being ready and `aiida` being installed one can setup the [backup](https://aiida.readthedocs.io/projects/aiida-core/en/latest/howto/installation.html#backing-up-your-installation) so that the data is stored in the blob. Of this way one would make sure that in the case of the failure of the VM the data is stored in as redundant manner as possible.
+
 
 ## Contribute
 
