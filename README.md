@@ -155,7 +155,7 @@ httpsProxy <insert the https proxy server Eg: http://10.1.0.23:8080>
 httpProxy <insert the http proxy server if any if you have turned https off using --use-https=true>
 ```
 
-If `blobfuse` were to fail, or if one wants to stop the process, one can `umount` the `path_where_to_mount` as with any other mounted disk.
+If `blobfuse` were to fail, or if one wants to stop the process, one can use `fusermount -u path_where_to_mount` to unmount the disk.
 
 #### Install `AiiDA`
 
