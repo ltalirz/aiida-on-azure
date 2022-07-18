@@ -11,19 +11,18 @@ _Disclaimer: this guide is under active development and offered without warranty
 
 ## Features
 
-- Azure CycleCloud with autoscaling SLURM cluster for compute
-- NFS for sharing file sharing  
+- Azure CycleCloud with autoscaling cluster for compute
+- NFS for sharing file sharing
 - Azure blobstorage for backup
 - AiiDA on standalone virtual machine, connected to the CycleCloud
-- ...
 
 ## Steps
 
 Broadly speaking there are four steps that need to be performed:
-1. Configuration of Azure account/services.
-2. Deployment/configuration of the **aiida-machine** with CycleCloud.
-3. Installation of AiiDA.
-4. Configuration/deployment of the **compute-cluster**.
+1. [Configuration of Azure account/services](#configuration-of-azure-accountservices).
+2. [Deployment/configuration of the **aiida-machine** with CycleCloud](#deploymentconfiguration-of-the-aiida-machine).
+3. [Installation of AiiDA](#installation-of-aiida).
+4. [Configuration/deployment of the **compute-cluster**](#configurationdeployment-of-the-compute-cluster).
 
 All of these steps assume that the user has an Azure account, with the appropriate permissions to [create resource groups](https://docs.microsoft.com/en-us/azure/azure-resource-manager/management/manage-resource-groups-portal), and a [service principal](https://docs.microsoft.com/en-us/azure/active-directory/develop/app-objects-and-service-principals#service-principal-object). The examples will show how many of the operations are performed making use of the Azure CLI, however, it is important to notice that all these operations can be also performed by the Azure portal or the Azure PowerShell.
 
@@ -157,7 +156,7 @@ httpProxy <insert the http proxy server if any if you have turned https off usin
 
 If `blobfuse` were to fail, or if one wants to stop the process, one can use `fusermount -u path_where_to_mount` to unmount the disk.
 
-#### Install `AiiDA`
+### Installation of `AiiDA`
 [Installing `AiiDA`](https://aiida.readthedocs.io/projects/aiida-core/en/latest/intro/install_system.html#intro-get-started-system-wide-install) in an Azure VM is performed in the same way as one would in a local machine. One should install it using a virtual environment to ensure that there are no conflicts with dependencies. It can be either via `virtualenv` or `conda`.
 
 First one should install the prerequisites 
@@ -182,6 +181,94 @@ When setting up the RabbitMQ configuration via `verdi setup` one must ensure tha
 
 With `blobfuse` being ready and `aiida` being installed one can setup the [backup](https://aiida.readthedocs.io/projects/aiida-core/en/latest/howto/installation.html#backing-up-your-installation) so that the data is stored in the blob. Of this way one would make sure that in the case of the failure of the VM the data is stored in as redundant manner as possible.
 
+### Configuration/deployment of the **compute-cluster**
+
+When creating a **compute-cluster** in CycleCloud the first thing that one needs to select is which kind of scheduler one wishes to use. CycleCloud supports a variety of schedulers such as [PBSPro](https://github.com/Azure/cyclecloud-pbspro), [GridEngine](https://github.com/Azure/cyclecloud-gridengine) and [SLURM](https://github.com/Azure/cyclecloud-slurm). Any of these defaults clusters provided with CycleCloud can be used to provision a cluster that can be used in combination with AiiDA with just small modifications. The possible options and defaults for a given cluster can be defined via a `template` file. The best way to generate a customized cluster is to take one of the templates found in the Azure github, modify it and upload it to the CycleCloud server so that it can be easily deployed.
+
+For using the **compute-clusters** with AiiDA, one can provision one of the default clusters as they are and afterwards set a [static public IP](https://docs.microsoft.com/en-us/azure/virtual-network/ip-services/virtual-networks-static-private-ip-arm-pportal#change-private-ip-address-to-static) and a [DNS label](https://docs.microsoft.com/en-us/azure/virtual-machines/create-fqdn), these are necessary, if one does not does this the IP address of the head node will vary, which means that one would have to define a different computer every time the IP changes.
+
+If one uses the pre-defined clusters they come with one of the Azure [HPC images](https://docs.microsoft.com/en-us/azure/virtual-machines/workloads/hpc/configure) which come with several compilers and libraries pre-installed which would allow the user to install most of the simulation software required. They also come with the [modules](https://modules.readthedocs.io/en/stable/index.html) package to handle the environment variables that different software packages might require.
+
+The pre-defined clusters allow the users the capability of [adding NFS](https://docs.microsoft.com/en-us/azure/cyclecloud/how-to/mount-fileserver?view=cyclecloud-8) disks to the cluster. This is the place where the users `${HOME}` folders will be mounted, it is important to notice that this disk will be persistent both for the head node and the compute nodes, hence it is also a good place to store the simulation code that will be used. If one has found a particular NFS configuration that will be used for any cluster one can define it in the cluster `template` file. For example the size of the default `shared` filesystem can be defined as
+```
+    [[[volume shared]]]
+    Size = 1024
+    SSD = True
+    Mount = builtinshared
+    Persistent = ${NFSType == "Builtin"}
+
+```
+
+A similar modification can be performed to ensure that the **compute-cluster** has a pre-defined static IP address and DNS label. First one needs to create a static public IP address using the [Azure CLI](https://docs.microsoft.com/en-us/azure/virtual-network/ip-services/create-public-ip-cli?tabs=create-public-ip-standard%2Ccreate-public-ip-zonal%2Crouting-preference#create-a-resource-group)
+```
+az network public-ip create \
+    --resource-group <resource_group_name> \
+    --name <public_static_ip_name> \
+    --version IPv4 \
+    --sku Standard \
+    --zone 1 2 3
+```
+
+Once the IP address has been created one can add it to the configuration of the cluster, of this way the cluster is ready to be used in conjunction with AiiDA
+
+```
+[[node scheduler]]
+[[[network-interface eth0]]]
+    PublicIp = /subscriptions/${subscription_id/resourceGroups/${resource_group_name}/providers/Microsoft.Network/publicIPAddresses/${public_static_ip_name}
+    AssociatePublicIpAddress = true
+    PublicDnsLabel = myuniquename
+```
+
+One can also define different types of calculation nodes, of that way one can handle jobs with different resource requirements, for this one can define different [nodearrays](https://docs.microsoft.com/en-us/azure/cyclecloud/cluster-references/node-nodearray-reference?view=cyclecloud-8), with different configurations
+```
+    [[node scheduler]]
+    MachineType = $SchedulerMachineType
+    ImageName = $SchedulerImageName
+    IsReturnProxy = $ReturnProxy
+    AdditionalClusterInitSpecs = $SchedulerClusterInitSpecs
+
+    [[nodearray hpc]]
+    MachineType = $HPCMachineType
+    ImageName = $HPCImageName
+    MaxCoreCount = $MaxHPCCoreCount
+
+    Azure.MaxScalesetSize = $MaxScalesetSize
+    AdditionalClusterInitSpecs = $HPCClusterInitSpecs
+
+```
+
+Where one can then define the default values of the different types of nodes
+```
+    [[parameters Virtual Machines ]]
+    Description = "The cluster, in this case, has two roles: the scheduler with shared filer and the execute hosts. Configure which VM types to use based on the requirements of your application."
+    Order = 20
+
+        [[[parameter Region]]]
+        Label = Region
+        Description = Deployment Location
+        ParameterType = Cloud.Region
+
+        [[[parameter SchedulerMachineType]]]
+        Label = Scheduler VM Type
+        Description = The VM type for scheduler and shared filer.
+        ParameterType = Cloud.MachineType
+        DefaultValue = Standard_B4ms
+
+        [[[parameter HPCMachineType]]]
+        Label = HPC VM Type
+        Description = The VM type for HPC nodes
+        ParameterType = Cloud.MachineType
+        DefaultValue = Standard_H16r
+        Config.Multiselect = true
+```
+one can add as many different types of nodes as desired, and these can then be accessed by the different schedulers when submitting a calculation.
+
+After one has modified the `template` file one can upload it to the CycleCloud application via the CycleCloud CLI. **Important** be sure to give this template its own name to avoid conflicts with previous templates that can have the same name.
+```
+cyclecloud import_template -c path_to_template/template.txt
+```
+
+After this the cluster can be provisioned via the CycleCloud application.
 
 ## Contribute
 
