@@ -19,30 +19,34 @@ _Disclaimer: this guide is under active development and offered without warranty
 ## Steps
 
 Broadly speaking there are four steps that need to be performed:
-1. [Configuration of Azure account/services](#configuration-of-azure-accountservices).
-2. [Deployment/configuration of the **aiida-machine** with CycleCloud](#deploymentconfiguration-of-the-aiida-machine).
-3. [Installation of AiiDA](#installation-of-aiida).
-4. [Configuration/deployment of the **compute-cluster**](#configurationdeployment-of-the-compute-cluster).
+1. [Configuration of Azure account/services](#1-configuration-of-azure-accountstorage-services).
+2. [Deployment/configuration of the **aiida-machine** with CycleCloud](#2-deploymentconfiguration-of-the-aiida-machine).
+3. [Installation of AiiDA](#3-installation-of-aiida).
+4. [Configuration/deployment of the **compute-cluster**](#4-configurationdeployment-of-the-compute-cluster).
 
-All of these steps assume that the user has an Azure account, with the appropriate permissions to [create resource groups](https://docs.microsoft.com/en-us/azure/azure-resource-manager/management/manage-resource-groups-portal), and a [service principal](https://docs.microsoft.com/en-us/azure/active-directory/develop/app-objects-and-service-principals#service-principal-object). The examples will show how many of the operations are performed making use of the Azure CLI, however, it is important to notice that all these operations can be also performed by the Azure portal or the Azure PowerShell.
+This guide assumes that the user has an Azure account, with the appropriate permissions to [create resource groups](https://docs.microsoft.com/en-us/azure/azure-resource-manager/management/manage-resource-groups-portal), and a [service principal](https://docs.microsoft.com/en-us/azure/active-directory/develop/app-objects-and-service-principals#service-principal-object). The guide shows how many of the operations are performed via the Azure CLI, but the same operations can also be performed via the Azure portal or the Azure PowerShell.
 
 
-### Configuration of Azure account/services
-To try to keep everything organized it is best to create a [resource group](https://docs.microsoft.com/en-us/azure/azure-resource-manager/management/manage-resource-groups-portal) where all the following services/resources will be placed. Such resource group can be created via the Azure CLI by
+### 1. Configuration of Azure account/storage services
+To try to keep everything organized it is best to create a [resource group](https://docs.microsoft.com/en-us/azure/azure-resource-manager/management/manage-resource-groups-portal) where all the following services/resources will be placed:
 ```
 az group create --name <resource_group_name> --location <location_name>
 ```
 
-Once that the resource group is created one will want to create a [storage account](https://docs.microsoft.com/en-us/azure/storage/common/storage-account-overview), this will give the user a centralized place where data can be stored, specially by making use of the [blob storage](https://docs.microsoft.com/en-us/azure/storage/blobs/storage-blobs-introduction). The storage account is created by the following command:
+Once the resource group is created, you will want to create a [storage account](https://docs.microsoft.com/en-us/azure/storage/common/storage-account-overview). This gives you a centralized place for storing data, especially by making use of the [blob storage](https://docs.microsoft.com/en-us/azure/storage/blobs/storage-blobs-introduction):
 
 ```
 az storage account create --name <storage_account_name> --resource-group <resource_group_name> --location <location_name> --sku Standard_ZRS  --encryption-services blob
 ```
-for simplicity the location of all the resources will be the same, however this is not necessary. **Important** not all resources are available in all regions, this is specially important for the **compute-cluster**, thus, check which [VM sizes](https://azure.microsoft.com/en-us/pricing/details/virtual-machines/linux/) one will want to use and choose the region accordingly.
+For simplicity, in this guide the location of all resources is the same. This is not necessary, however.
 
-With the storage account created one can then create a container, a container is the place where the data will actually be stored, this is what will be connected to the VM using the [blobfuse](https://github.com/Azure/azure-storage-fuse) application. **Important** when mounting `blobfuse` one can either give permission to the files only to the user mounting the `blobfuse` or to all the users, i.e all users would have access to **all** folders/files present in this container, if one wants to keep data strictly separated for each user, it is advisable to create a container for each user. 
+**Important:** Not all resources are available in all regions. This is particularly relevantt for the **compute-cluster**: check which [VM sizes](https://azure.microsoft.com/en-us/pricing/details/virtual-machines/linux/) you want to use, and choose the region accordingly.
 
-A container is then created via
+With the storage account created, create a container where the data will actually be stored. The container will eventually be connected to the VM using the [blobfuse](https://github.com/Azure/azure-storage-fuse) application. 
+
+**Important:** When mounting `blobfuse` you can choose between giving permission to the files only to the user mounting the `blobfuse` or to all the users (i.e all users would have access to **all** folders/files present in this container). If you want to keep data strictly separated for each user, it is advisable to create a container for each user.
+
+Below, the first command gives the user the capability of generating the container and the second creates the container itself.
 ```
 az ad signed-in-user show --query objectId -o tsv | az role assignment create \
     --role "Storage Blob Data Contributor" \
@@ -55,19 +59,19 @@ az storage container create \
     --auth-mode login
 ```
 
-Where the first command gives the user the capability of generating the container and the second creates the container itself.
 
 
-### Deployment/configuration of the **aiida-machine**
-This machine will host the CycleCloud server which will be used to spawn the **compute-cluster**. This can be done in several ways, either using the [Azure marketplace](https://docs.microsoft.com/en-us/azure/cyclecloud/qs-install-marketplace?view=cyclecloud-8), an [ARM template](https://docs.microsoft.com/en-us/azure/cyclecloud/how-to/install-arm?view=cyclecloud-8), using a [container](https://docs.microsoft.com/en-us/azure/cyclecloud/how-to/run-in-container?view=cyclecloud-8) or via [manual installation](https://docs.microsoft.com/en-us/azure/cyclecloud/how-to/install-manual?view=cyclecloud-8). In this guide the manual installation si followed.
 
-The first thing to do is to [deploy a VM](https://docs.microsoft.com/en-us/azure/virtual-machines/linux/quick-create-portal) in the resource group that has been created. The configuration of the machine will depend on the number of users and applications that will be deployed. It is important to consider that this machine will be always on, so it is important to strike the right balance of performance and cost. The VM should have a Linux OS, for simplicity Ubutnu will be used for this example, though the procedure is similar for RHEL.
+### 2. Deployment/configuration of the **aiida-machine**
+This machine will host the CycleCloud server which will be used to spawn the **compute-cluster**. This can be done in several ways, either using the [Azure marketplace](https://docs.microsoft.com/en-us/azure/cyclecloud/qs-install-marketplace?view=cyclecloud-8), an [ARM template](https://docs.microsoft.com/en-us/azure/cyclecloud/how-to/install-arm?view=cyclecloud-8), using a [container](https://docs.microsoft.com/en-us/azure/cyclecloud/how-to/run-in-container?view=cyclecloud-8) or via [manual installation](https://docs.microsoft.com/en-us/azure/cyclecloud/how-to/install-manual?view=cyclecloud-8). This guide follows the manual installation route.
 
-One can [create the VM using an SSH key](https://docs.microsoft.com/en-us/azure/virtual-machines/linux/quick-create-portal#create-virtual-machine), of this way one can connect using a RSA key. One can improve the security by requiring that all users connect [only using RSA keys](https://askubuntu.com/questions/346857/how-do-i-force-ssh-to-only-allow-users-with-a-key-to-log-in). It is also recommended to setup [fail2ban](https://www.digitalocean.com/community/tutorials/how-to-protect-ssh-with-fail2ban-on-ubuntu-20-04), to try to protect against brute force attacks as much as possible.
+Start by [deploying a VM](https://docs.microsoft.com/en-us/azure/virtual-machines/linux/quick-create-portal) in your resource group. The configuration of the machine will depend on the number of users and applications that will be deployed. Consider that this machine will be always-on, so it is important to strike the right balance of performance and cost. The VM should have a Linux OS - here we choose Ubuntu, though the procedure is similar for RHEL.
+
+One can [create the VM using an SSH key](https://docs.microsoft.com/en-us/azure/virtual-machines/linux/quick-create-portal#create-virtual-machine), in this way one can connect using a RSA key. One can improve the security by requiring that all users connect [only using RSA keys](https://askubuntu.com/questions/346857/how-do-i-force-ssh-to-only-allow-users-with-a-key-to-log-in). It is also recommended to setup [fail2ban](https://www.digitalocean.com/community/tutorials/how-to-protect-ssh-with-fail2ban-on-ubuntu-20-04), to try to protect against brute force attacks as much as possible.
 
 The public IP address of the machine can be [static](https://docs.microsoft.com/en-us/azure/virtual-network/ip-services/virtual-networks-static-private-ip-arm-pportal#change-private-ip-address-to-static) and a [DNS label](https://docs.microsoft.com/en-us/azure/virtual-machines/create-fqdn) can be given. Though not strictly necessary (in contrast to the head node of the **compute-cluster**) it might be useful to ease the connection to the VM.
 
-Once the machine is created, and the connectivity is solved (SSH keys, fail2ban, DNS label, etc.) one should update the VM `sudo apt-get update && sudo apt-get upgrade` to ensure that the latest security patches and updates are applied.
+Once the machine is created, and the connectivity is solved (SSH keys, fail2ban, DNS label, etc.), update the VM `sudo apt-get update && sudo apt-get upgrade` to ensure that the latest security patches and updates are applied.
 
 #### Install CycleCloud
 The next step is to [install CycleCloud](https://docs.microsoft.com/en-us/azure/cyclecloud/how-to/install-manual?view=cyclecloud-8), for which one first needs to install a couple of dependencies:
@@ -82,7 +86,7 @@ sudo apt update
 sudo apt -y install cyclecloud8
 ```
 
-Once that is done all the pieces that comprise CycleCloud (sans the CLI) will be installed in the VM, however, they need to be configured so that they work properly. This must be done via a web browser. If the CycleCloud server can be accessed from the public IP, one can use the browser from the local machine, otherwise one needs to install a browser in the VM, in the following `firefox` will be used:
+Once that is done, all the pieces that comprise CycleCloud (sans the CLI) will be installed in the VM, however, they need to be configured so that they work properly. This must be done via a web browser. If the CycleCloud server can be accessed from the public IP, one can use the browser from the local machine, otherwise one needs to install a browser in the VM, in the following `firefox` will be used:
 ```
 sudo apt-get install firefox
 ```
@@ -92,7 +96,7 @@ firefox -url=http://cycle_coud_domain_name:8080 -no-remote
 ```
 after that one must [configure the server](https://docs.microsoft.com/en-us/azure/cyclecloud/how-to/install-manual?view=cyclecloud-8#configuration). This is done by setting an administrator user account, with a password and ssh-key.
 
-Inside the CycleCloud web application one can [configure](https://docs.microsoft.com/en-us/azure/cyclecloud/concepts/user-management?view=cyclecloud-8) which users have access and level of access to the CycleCloud clusters. It is recommended that one setups the ssh keys of each user here, since of that way once the cluster is deployed the users will be able to login to the head node using ssh.
+Inside the CycleCloud web application one can [configure](https://docs.microsoft.com/en-us/azure/cyclecloud/concepts/user-management?view=cyclecloud-8) which users have access and level of access to the CycleCloud clusters. It is recommended that one sets up the ssh keys of each user here, since of that way once the cluster is deployed the users will be able to login to the head node using ssh.
 
 One should also configure the CycleCloud application to use a [service principal](https://docs.microsoft.com/en-us/azure/cyclecloud/how-to/service-principals?view=cyclecloud-8#permissions), this will allow the CycleCloud application to create nodes inside the resource group (or other resource groups).
 
@@ -156,7 +160,7 @@ httpProxy <insert the http proxy server if any if you have turned https off usin
 
 If `blobfuse` were to fail, or if one wants to stop the process, one can use `fusermount -u path_where_to_mount` to unmount the disk.
 
-### Installation of `AiiDA`
+### 3. Installation of `AiiDA`
 [Installing `AiiDA`](https://aiida.readthedocs.io/projects/aiida-core/en/latest/intro/install_system.html#intro-get-started-system-wide-install) in an Azure VM is performed in the same way as one would in a local machine. One should install it using a virtual environment to ensure that there are no conflicts with dependencies. It can be either via `virtualenv` or `conda`.
 
 First one should install the prerequisites 
@@ -181,15 +185,15 @@ When setting up the RabbitMQ configuration via `verdi setup` one must ensure tha
 
 With `blobfuse` being ready and `aiida` being installed one can setup the [backup](https://aiida.readthedocs.io/projects/aiida-core/en/latest/howto/installation.html#backing-up-your-installation) so that the data is stored in the blob. Of this way one would make sure that in the case of the failure of the VM the data is stored in as redundant manner as possible.
 
-### Configuration/deployment of the **compute-cluster**
+### 4. Configuration/deployment of the **compute-cluster**
 
-When creating a **compute-cluster** in CycleCloud the first thing that one needs to select is which kind of scheduler one wishes to use. CycleCloud supports a variety of schedulers such as [PBSPro](https://github.com/Azure/cyclecloud-pbspro), [GridEngine](https://github.com/Azure/cyclecloud-gridengine) and [SLURM](https://github.com/Azure/cyclecloud-slurm). Any of these defaults clusters provided with CycleCloud can be used to provision a cluster that can be used in combination with AiiDA with just small modifications. The possible options and defaults for a given cluster can be defined via a `template` file. The best way to generate a customized cluster is to take one of the templates found in the Azure github, modify it and upload it to the CycleCloud server so that it can be easily deployed.
+When creating a **compute-cluster** in CycleCloud, the first thing that one needs to select is which kind of scheduler one wishes to use. CycleCloud supports a variety of schedulers such as [PBSPro](https://github.com/Azure/cyclecloud-pbspro), [GridEngine](https://github.com/Azure/cyclecloud-gridengine) and [SLURM](https://github.com/Azure/cyclecloud-slurm). Any of these defaults clusters provided with CycleCloud can be used to provision a cluster that can be used in combination with AiiDA with just small modifications. The possible options and defaults for a given cluster can be defined via a `template` file. The best way to generate a customized cluster is to take one of the templates found in the Azure github, modify it and upload it to the CycleCloud server so that it can be easily deployed.
 
-For using the **compute-clusters** with AiiDA, one can provision one of the default clusters as they are and afterwards set a [static public IP](https://docs.microsoft.com/en-us/azure/virtual-network/ip-services/virtual-networks-static-private-ip-arm-pportal#change-private-ip-address-to-static) and a [DNS label](https://docs.microsoft.com/en-us/azure/virtual-machines/create-fqdn), these are necessary, if one does not does this the IP address of the head node will vary, which means that one would have to define a different computer every time the IP changes.
+For using the **compute-cluster** with AiiDA, one can provision one of the default clusters from a template and afterwards set a [static public IP](https://docs.microsoft.com/en-us/azure/virtual-network/ip-services/virtual-networks-static-private-ip-arm-pportal#change-private-ip-address-to-static) and a [DNS label](https://docs.microsoft.com/en-us/azure/virtual-machines/create-fqdn). Without the last step, the IP address of the head node will vary, and your users would  have to define a different computer every time the IP changes.
 
-If one uses the pre-defined clusters they come with one of the Azure [HPC images](https://docs.microsoft.com/en-us/azure/virtual-machines/workloads/hpc/configure) which come with several compilers and libraries pre-installed which would allow the user to install most of the simulation software required. They also come with the [modules](https://modules.readthedocs.io/en/stable/index.html) package to handle the environment variables that different software packages might require.
+The pre-defined clusters use one of the Azure [HPC images](https://docs.microsoft.com/en-us/azure/virtual-machines/workloads/hpc/configure), which come with several compilers and libraries pre-installed which would allow the user to install most of the simulation software required. They also come with the [modules](https://modules.readthedocs.io/en/stable/index.html) package to handle the environment variables that different software packages might require.
 
-The pre-defined clusters allow the users the capability of [adding NFS](https://docs.microsoft.com/en-us/azure/cyclecloud/how-to/mount-fileserver?view=cyclecloud-8) disks to the cluster. This is the place where the users `${HOME}` folders will be mounted, it is important to notice that this disk will be persistent both for the head node and the compute nodes, hence it is also a good place to store the simulation code that will be used. If one has found a particular NFS configuration that will be used for any cluster one can define it in the cluster `template` file. For example the size of the default `shared` filesystem can be defined as
+The pre-defined clusters allow the users the capability of [adding NFS](https://docs.microsoft.com/en-us/azure/cyclecloud/how-to/mount-fileserver?view=cyclecloud-8) disks to the cluster. This is the place where the users' `${HOME}` folders will be mounted. It is important to notice that this disk will be persistent both for the head node and the compute nodes, hence it is also a good place to store the simulation code that will be used. If one has found a particular NFS configuration that will be used for any cluster one can define it in the cluster `template` file. For example the size of the default `shared` filesystem can be defined as
 ```
     [[[volume shared]]]
     Size = 1024
@@ -219,7 +223,7 @@ Once the IP address has been created one can add it to the configuration of the 
     PublicDnsLabel = myuniquename
 ```
 
-One can also define different types of calculation nodes, of that way one can handle jobs with different resource requirements, for this one can define different [nodearrays](https://docs.microsoft.com/en-us/azure/cyclecloud/cluster-references/node-nodearray-reference?view=cyclecloud-8), with different configurations
+One can also define different types of calculation nodes in order to handle jobs with different resource requirements. For this, define different [nodearrays](https://docs.microsoft.com/en-us/azure/cyclecloud/cluster-references/node-nodearray-reference?view=cyclecloud-8), with different configurations
 ```
     [[node scheduler]]
     MachineType = $SchedulerMachineType
@@ -261,9 +265,9 @@ Where one can then define the default values of the different types of nodes
         DefaultValue = Standard_H16r
         Config.Multiselect = true
 ```
-one can add as many different types of nodes as desired, and these can then be accessed by the different schedulers when submitting a calculation.
+You can add as many different types of nodes as desired, and these can then be accessed by the different schedulers when submitting a calculation.
 
-After one has modified the `template` file one can upload it to the CycleCloud application via the CycleCloud CLI. **Important** be sure to give this template its own name to avoid conflicts with previous templates that can have the same name.
+After one has modified the `template` file one can upload it to the CycleCloud application via the CycleCloud CLI. **Important:** give your template a unique name in order to avoid conflicts with previous templates of the same name.
 ```
 cyclecloud import_template -c path_to_template/template.txt
 ```
